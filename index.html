@@ -498,126 +498,313 @@
 
 <script>
 // =====================================================================
-// DGS FINGERSPELL HINTS (simplified descriptions for children)
+// DGS FINGERSPELL HINTS
 // =====================================================================
 const HINTS = {
-  A: "Mache eine Faust. Der Daumen liegt seitlich an.",
-  B: "Alle vier Finger gestreckt und zusammen. Daumen eingeschlagen.",
-  C: "Forme ein 'C' mit Daumen und Fingern, wie eine Tasse.",
-  D: "Zeigefinger zeigt nach oben, andere Finger bilden einen Kreis.",
-  E: "Alle Finger gebeugt, Fingerkuppen berühren den Daumen.",
-  F: "Daumen und Zeigefinger bilden einen Kreis. Andere Finger gestreckt.",
-  G: "Zeigefinger und Daumen zeigen nach links/vorne, parallel.",
-  H: "Zeige- und Mittelfinger gestreckt und nebeneinander, waagerecht.",
-  I: "Kleiner Finger gestreckt. Alle anderen eingeschlagen.",
-  J: "Kleiner Finger gestreckt, mache ein 'J' in der Luft.",
-  K: "Zeige- und Mittelfinger gestreckt, Daumen zwischen ihnen.",
-  L: "Daumen und Zeigefinger gestreckt, formen ein 'L'.",
-  M: "Drei Finger (Zeige-, Mittel-, Ringfinger) über dem Daumen.",
-  N: "Zwei Finger (Zeige-, Mittelfinger) über dem Daumen.",
-  O: "Alle Finger und Daumen formen einen 'O'-Kreis.",
-  P: "Wie K, aber nach unten gezeigt.",
-  Q: "Wie G, aber nach unten gezeigt.",
-  R: "Zeige- und Mittelfinger gekreuzt, gestreckt.",
-  S: "Faust mit Daumen vor den Fingern.",
-  T: "Daumen zwischen Zeige- und Mittelfinger.",
-  U: "Zeige- und Mittelfinger gestreckt und zusammen, nach oben.",
-  V: "Zeige- und Mittelfinger gestreckt auseinander (Friedenszeichen).",
-  W: "Zeige-, Mittel- und Ringfinger gestreckt und auseinander.",
-  X: "Zeigefinger gebeugt/eingehakt.",
-  Y: "Daumen und kleiner Finger gestreckt auseinander.",
-  Z: "Zeigefinger malt ein 'Z' in die Luft.",
+  A: "Mache eine Faust. Der Daumen liegt seitlich an der Faust.",
+  B: "Alle vier Finger gestreckt und zusammen. Daumen fest eingeschlagen.",
+  C: "Forme ein 'C' mit Daumen und allen Fingern – wie eine Tasse greifen.",
+  D: "Zeigefinger zeigt nach oben. Daumen, Mittel-, Ring- und kleiner Finger bilden einen Kreis.",
+  E: "Alle Finger stark gebeugt, Fingerkuppen zeigen zur Handfläche.",
+  F: "Daumen und Zeigefinger berühren sich (Kreis). Mittel-, Ring- und kleiner Finger gestreckt.",
+  G: "Zeigefinger und Daumen waagerecht ausgestreckt, zeigen in dieselbe Richtung.",
+  H: "Zeige- und Mittelfinger gestreckt und zusammen, waagerecht zur Seite.",
+  I: "Nur der kleine Finger ist gestreckt. Alle anderen eingeschlagen.",
+  J: "Kleinen Finger strecken und ein 'J' in die Luft malen (Bogenbewegung).",
+  K: "Zeige- und Mittelfinger gestreckt und gespreizt. Daumen berührt den Mittelfinger.",
+  L: "Daumen und Zeigefinger gestreckt und im rechten Winkel – wie ein 'L'.",
+  M: "Zeige-, Mittel- und Ringfinger über den eingeschlagenen Daumen legen.",
+  N: "Zeige- und Mittelfinger über den eingeschlagenen Daumen legen.",
+  O: "Alle Fingerspitzen und Daumen treffen sich zu einem 'O'-Kreis.",
+  P: "Wie K, aber die Hand zeigt mit den Fingern nach unten.",
+  Q: "Wie G, aber Zeigefinger und Daumen zeigen nach unten.",
+  R: "Zeige- und Mittelfinger gestreckt und übereinander gekreuzt.",
+  S: "Faust machen. Daumen liegt über die Finger (vor den Fingern).",
+  T: "Faust machen. Daumen schiebt sich zwischen Zeige- und Mittelfinger.",
+  U: "Zeige- und Mittelfinger gestreckt und zusammengehalten, zeigen nach oben.",
+  V: "Zeige- und Mittelfinger gestreckt und gespreizt (Friedenszeichen / V).",
+  W: "Zeige-, Mittel- und Ringfinger gestreckt und gespreizt.",
+  X: "Zeigefinger ist gebeugt wie ein Haken. Alle anderen Finger eingeschlagen.",
+  Y: "Daumen und kleiner Finger gestreckt und auseinander. Alle anderen eingeschlagen.",
+  Z: "Zeigefinger gestreckt, ein 'Z' in die Luft malen.",
 };
 
 // =====================================================================
-// DGS FINGER CONFIGURATION RULES (landmark-based heuristics)
-// Each letter: function(landmarks) => boolean
-// landmarks: array of 21 {x,y,z} normalized coords
+// GEOMETRY HELPERS
 // =====================================================================
+function vec(a, b) { return { x: b.x-a.x, y: b.y-a.y, z: (b.z||0)-(a.z||0) }; }
+function dot(u, v) { return u.x*v.x + u.y*v.y + u.z*v.z; }
+function mag(u)    { return Math.sqrt(u.x*u.x + u.y*u.y + u.z*u.z); }
+function angleDeg(a, b, c) {
+  // angle at vertex b
+  const u = vec(b, a), v = vec(b, c);
+  const cosA = dot(u,v) / (mag(u)*mag(v) + 1e-8);
+  return Math.acos(Math.max(-1, Math.min(1, cosA))) * 180 / Math.PI;
+}
+function dist2d(a, b) { return Math.sqrt((a.x-b.x)**2 + (a.y-b.y)**2); }
+function dist3d(a, b) { return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2+((a.z||0)-(b.z||0))**2); }
 
-// Helper: finger tip / pip / mcp indices
-const TIPS = [4,8,12,16,20];
-const PIPS = [3,7,11,15,19];
-const MCPS = [1,5,9,13,17];
+// Hand scale: distance from wrist(0) to middle-MCP(9) — normalises for distance to camera
+function handScale(lm) { return dist3d(lm[0], lm[9]) + 1e-6; }
 
-function dist(a,b){ return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2+(a.z-b.z)**2); }
-function dist2d(a,b){ return Math.sqrt((a.x-b.x)**2+(a.y-b.y)**2); }
+// Finger curl: average of PIP and DIP bend angles (0=fully open, ~180=fully closed)
+// Returns degrees (higher = more curled)
+function fingerCurl(lm, mcp, pip, dip, tip) {
+  const a1 = angleDeg(lm[mcp], lm[pip], lm[dip]);
+  const a2 = angleDeg(lm[pip], lm[dip], lm[tip]);
+  return (a1 + a2) / 2;
+}
+// Individual finger curls (0-3: index..pinky)
+function curl(lm, f) {
+  const joints = [[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]][f];
+  return fingerCurl(lm, ...joints);
+}
+// Thumb curl: angle wrist→CMC→MCP→tip chain
+function thumbCurl(lm) {
+  const a1 = angleDeg(lm[0], lm[2], lm[3]);
+  const a2 = angleDeg(lm[2], lm[3], lm[4]);
+  return (a1 + a2) / 2;
+}
+// Is finger extended? curl < threshold
+const EXT_THRESH  = 145; // degrees – above this = extended
+const CURL_THRESH = 110; // below this = clearly curled
+function ext(lm, f)    { return curl(lm,f) > EXT_THRESH; }
+function curled(lm, f) { return curl(lm,f) < CURL_THRESH; }
+function thumbExt(lm)  { return thumbCurl(lm) > 140; }
+function thumbCurled(lm){ return thumbCurl(lm) < 110; }
 
-function isFingerExtended(lm, finger) {
-  // finger: 0=index,1=middle,2=ring,3=pinky
-  const tipIdx = [8,12,16,20][finger];
-  const pipIdx = [6,10,14,18][finger];
-  const mcpIdx = [5,9,13,17][finger];
-  return lm[tipIdx].y < lm[pipIdx].y - 0.02;
+// Tip-to-tip distance normalised by hand scale
+function tipDist(lm, t1, t2) { return dist3d(lm[t1],lm[t2]) / handScale(lm); }
+// Tip-to-landmark
+function tipToLm(lm, tip, target) { return dist3d(lm[tip],lm[target]) / handScale(lm); }
+
+// Tip Y relative to MCP (negative = tip above MCP = extended upwards)
+function tipAboveMCP(lm, tipIdx, mcpIdx) { return lm[tipIdx].y < lm[mcpIdx].y; }
+
+// Spread between two finger tips (normalised)
+function spread(lm, t1, t2) { return tipDist(lm,t1,t2); }
+
+// =====================================================================
+// GESTURE LIBRARY  – angle-based, hand-scale normalised
+// Each function returns a confidence 0..1
+// =====================================================================
+function scoreA(lm) {
+  // Fist, thumb rests on side (not over fingers, not extended far)
+  const fist = [0,1,2,3].every(f => curled(lm,f));
+  const thumbSide = !thumbExt(lm) && lm[4].x > lm[3].x - 0.04; // thumb beside fist
+  return (fist ? 0.7 : 0) + (thumbSide ? 0.3 : 0);
 }
-function isThumbExtended(lm) {
-  return lm[4].x < lm[3].x - 0.02; // for right hand mirrored
+function scoreB(lm) {
+  // 4 fingers fully extended & together, thumb tucked across palm
+  const fingersUp = [0,1,2,3].every(f => ext(lm,f));
+  const thumbIn = thumbCurled(lm) || lm[4].x > lm[5].x - 0.02;
+  const together = spread(lm,8,20) < 0.35;
+  return (fingersUp?0.5:0) + (thumbIn?0.3:0) + (together?0.2:0);
 }
-function isThumbExtendedAbs(lm) {
-  return dist2d(lm[4],lm[0]) > dist2d(lm[3],lm[0]);
+function scoreC(lm) {
+  // All fingers moderately bent (not flat, not fist) forming arc
+  const partBent = [0,1,2,3].map(f => { const c=curl(lm,f); return c>100&&c<160?1:0; });
+  const thumbOpen = lm[4].x < lm[8].x + 0.1; // thumb somewhat open
+  const gap = tipDist(lm,4,8); // thumb-index gap moderate
+  return (partBent.reduce((a,b)=>a+b,0)/4)*0.6 + (gap>0.15&&gap<0.55?0.25:0) + (thumbOpen?0.15:0);
 }
-function isFist(lm) {
-  return !isFingerExtended(lm,0) && !isFingerExtended(lm,1) &&
-         !isFingerExtended(lm,2) && !isFingerExtended(lm,3);
+function scoreD(lm) {
+  // Index extended up, other 3 fingers curled, thumb tip touches middle-tip circle
+  const idxUp = ext(lm,0);
+  const rest = [1,2,3].every(f=>curled(lm,f));
+  const thumbToMiddle = tipDist(lm,4,12) < 0.35;
+  return (idxUp?0.5:0)+(rest?0.35:0)+(thumbToMiddle?0.15:0);
 }
-function allFingersExtended(lm) {
-  return isFingerExtended(lm,0) && isFingerExtended(lm,1) &&
-         isFingerExtended(lm,2) && isFingerExtended(lm,3);
+function scoreE(lm) {
+  // All 4 fingers strongly bent, tips near base of fingers (palm direction)
+  const allBent = [0,1,2,3].every(f=>curl(lm,f)<115);
+  const tipsLow = [8,12,16,20].every(t=>lm[t].y > lm[t-2].y - 0.01);
+  return (allBent?0.6:0)+(tipsLow?0.4:0);
 }
-function fingersTogether(lm, f1, f2) {
-  const tips1 = [8,12,16,20];
-  const tips2 = [8,12,16,20];
-  return dist2d(lm[tips1[f1]],lm[tips2[f2]]) < 0.05;
+function scoreF(lm) {
+  // Index tip touches thumb tip, other 3 fingers extended
+  const pinch = tipDist(lm,4,8) < 0.28;
+  const midsUp = [1,2,3].every(f=>ext(lm,f));
+  return (pinch?0.55:0)+(midsUp?0.45:0);
 }
-function tipTouchesThumb(lm, finger) {
-  const tips = [8,12,16,20];
-  return dist2d(lm[tips[finger]], lm[4]) < 0.07;
+function scoreG(lm) {
+  // Index & thumb horizontal (pointing sideways), other fingers curled
+  const idxExt = ext(lm,0);
+  const rest = [1,2,3].every(f=>curled(lm,f));
+  const thumbExt_ = thumbExt(lm);
+  // Both index and thumb roughly at same height (horizontal)
+  const horiz = Math.abs(lm[8].y - lm[4].y) < 0.12;
+  return (idxExt?0.35:0)+(rest?0.3:0)+(thumbExt_?0.2:0)+(horiz?0.15:0);
+}
+function scoreH(lm) {
+  // Index+middle extended together sideways, ring+pinky curled
+  const idxMidUp = ext(lm,0)&&ext(lm,1);
+  const rest = [2,3].every(f=>curled(lm,f));
+  const together = spread(lm,8,12) < 0.22;
+  return (idxMidUp?0.5:0)+(rest?0.3:0)+(together?0.2:0);
+}
+function scoreI(lm) {
+  // Only pinky extended, others curled
+  const pinkyUp = ext(lm,3);
+  const rest = [0,1,2].every(f=>curled(lm,f));
+  return (pinkyUp?0.6:0)+(rest?0.4:0);
+}
+// J = I with motion – we accept I shape
+function scoreJ(lm) { return scoreI(lm); }
+function scoreK(lm) {
+  // Index+middle extended & spread, thumb touches middle pip
+  const idxUp = ext(lm,0), midUp = ext(lm,1);
+  const rest = [2,3].every(f=>curled(lm,f));
+  const spread_ = spread(lm,8,12) > 0.12;
+  const thumbMid = tipDist(lm,4,11) < 0.35; // thumb near middle pip
+  return (idxUp?0.3:0)+(midUp?0.3:0)+(rest?0.2:0)+(spread_?0.1:0)+(thumbMid?0.1:0);
+}
+function scoreL(lm) {
+  // Index up, thumb sideways extended, perfect L shape
+  const idxUp = ext(lm,0);
+  const rest = [1,2,3].every(f=>curled(lm,f));
+  const thumbOut = thumbExt(lm);
+  const angle = angleDeg(lm[8], lm[5], lm[4]); // L angle at index-MCP
+  const rightAngle = angle > 60 && angle < 130;
+  return (idxUp?0.35:0)+(rest?0.3:0)+(thumbOut?0.2:0)+(rightAngle?0.15:0);
+}
+function scoreM(lm) {
+  // 3 fingers (index/middle/ring) folded over tucked thumb – tight fist variant
+  const threeFold = [0,1,2].every(f=>curled(lm,f));
+  const pinkyIn = curled(lm,3);
+  // thumb covered = tip under fingers
+  const thumbUnder = lm[4].y > lm[6].y - 0.02;
+  return (threeFold?0.5:0)+(pinkyIn?0.2:0)+(thumbUnder?0.3:0);
+}
+function scoreN(lm) {
+  // 2 fingers (index/middle) over thumb, ring+pinky curled
+  const twoFold = [0,1].every(f=>curled(lm,f));
+  const rest = [2,3].every(f=>curled(lm,f));
+  const thumbUnder = lm[4].y > lm[6].y - 0.02;
+  // N vs M: fewer fingers over thumb; check ring is NOT over thumb
+  const ringClear = lm[16].y < lm[14].y + 0.03;
+  return (twoFold?0.45:0)+(rest?0.2:0)+(thumbUnder?0.2:0)+(ringClear?0.15:0);
+}
+function scoreO(lm) {
+  // All fingertips pinch toward thumb in round O
+  const allBent = [0,1,2,3].every(f=>curl(lm,f)>105&&curl(lm,f)<165);
+  const tipClose = tipDist(lm,4,8)<0.28 && tipDist(lm,4,12)<0.38;
+  return (allBent?0.5:0)+(tipClose?0.5:0);
+}
+function scoreP(lm) {
+  // Like K but pointing downwards
+  const idxDown = !tipAboveMCP(lm,8,5) && ext(lm,0);
+  const midDown = ext(lm,1);
+  const rest = [2,3].every(f=>curled(lm,f));
+  return (idxDown?0.4:0)+(midDown?0.3:0)+(rest?0.3:0);
+}
+function scoreQ(lm) {
+  // Like G but pointing down
+  const idxExt = ext(lm,0);
+  const rest = [1,2,3].every(f=>curled(lm,f));
+  const pointDown = lm[8].y > lm[5].y + 0.02;
+  const thumbOut = thumbExt(lm);
+  return (idxExt?0.3:0)+(rest?0.3:0)+(pointDown?0.25:0)+(thumbOut?0.15:0);
+}
+function scoreR(lm) {
+  // Index+middle crossed/overlapping, other fingers curled
+  const idxUp = ext(lm,0), midUp = ext(lm,1);
+  const rest = [2,3].every(f=>curled(lm,f));
+  // Crossed = very close tips
+  const close = spread(lm,8,12) < 0.15;
+  return (idxUp?0.35:0)+(midUp?0.25:0)+(rest?0.2:0)+(close?0.2:0);
+}
+function scoreS(lm) {
+  // Fist with thumb across front of fingers
+  const fist = [0,1,2,3].every(f=>curled(lm,f));
+  const thumbAcross = lm[4].y > lm[8].y - 0.05 && lm[4].x > lm[5].x - 0.08;
+  return (fist?0.65:0)+(thumbAcross?0.35:0);
+}
+function scoreT(lm) {
+  // Thumb pushes between index and middle, all fingers curled to fist
+  const fist = [0,1,2,3].every(f=>curled(lm,f));
+  const thumbBetween = lm[4].x < lm[8].x + 0.06 && lm[4].x > lm[5].x - 0.1
+                    && lm[4].y < lm[6].y + 0.04;
+  return (fist?0.55:0)+(thumbBetween?0.45:0);
+}
+function scoreU(lm) {
+  // Index+middle extended together upward, rest curled
+  const idxUp = ext(lm,0), midUp = ext(lm,1);
+  const rest = [2,3].every(f=>curled(lm,f));
+  const together = spread(lm,8,12) < 0.2;
+  const pointsUp = lm[8].y < lm[5].y && lm[12].y < lm[9].y;
+  return (idxUp?0.25:0)+(midUp?0.25:0)+(rest?0.2:0)+(together?0.15:0)+(pointsUp?0.15:0);
+}
+function scoreV(lm) {
+  // Index+middle extended & spread apart
+  const idxUp = ext(lm,0), midUp = ext(lm,1);
+  const rest = [2,3].every(f=>curled(lm,f));
+  const spread_ = spread(lm,8,12) > 0.2;
+  return (idxUp?0.3:0)+(midUp?0.3:0)+(rest?0.2:0)+(spread_?0.2:0);
+}
+function scoreW(lm) {
+  // 3 fingers (index/middle/ring) extended & spread, pinky curled
+  const threeUp = [0,1,2].every(f=>ext(lm,f));
+  const pinkyIn = curled(lm,3);
+  const spread_ = spread(lm,8,16) > 0.25;
+  return (threeUp?0.5:0)+(pinkyIn?0.3:0)+(spread_?0.2:0);
+}
+function scoreX(lm) {
+  // Index strongly bent (hooked), others curled
+  const indexHook = curl(lm,0) > 115 && curl(lm,0) < 160;
+  const rest = [1,2,3].every(f=>curled(lm,f));
+  return (indexHook?0.65:0)+(rest?0.35:0);
+}
+function scoreY(lm) {
+  // Thumb + pinky extended, index/middle/ring curled
+  const thumbOut = thumbExt(lm);
+  const pinkyUp = ext(lm,3);
+  const rest = [0,1,2].every(f=>curled(lm,f));
+  const spread_ = tipDist(lm,4,20) > 0.35;
+  return (thumbOut?0.3:0)+(pinkyUp?0.3:0)+(rest?0.25:0)+(spread_?0.15:0);
+}
+// Z = index extended + wave motion – static: accept index-only point
+function scoreZ(lm) {
+  const idxUp = ext(lm,0);
+  const rest = [1,2,3].every(f=>curled(lm,f));
+  const thumbIn = !thumbExt(lm);
+  return (idxUp?0.5:0)+(rest?0.35:0)+(thumbIn?0.15:0);
 }
 
-const GESTURE_CHECKS = {
-  A: lm => isFist(lm) && dist2d(lm[4],lm[2]) > 0.03,
-  B: lm => allFingersExtended(lm) && lm[4].x > lm[5].x - 0.02 && !isThumbExtendedAbs(lm),
-  C: lm => {
-    const curled = !isFingerExtended(lm,0)&&!isFingerExtended(lm,1)&&!isFingerExtended(lm,2)&&!isFingerExtended(lm,3);
-    const thumbFar = lm[4].x < lm[8].x + 0.05;
-    return curled && thumbFar && dist2d(lm[4],lm[8]) > 0.05 && dist2d(lm[4],lm[8]) < 0.2;
-  },
-  D: lm => isFingerExtended(lm,0) && !isFingerExtended(lm,1) && !isFingerExtended(lm,2) && !isFingerExtended(lm,3) && dist2d(lm[4],lm[12]) < 0.08,
-  E: lm => {
-    const allBent = lm[8].y > lm[6].y && lm[12].y > lm[10].y && lm[16].y > lm[14].y && lm[20].y > lm[18].y;
-    return allBent && dist2d(lm[8],lm[4]) < 0.08;
-  },
-  F: lm => tipTouchesThumb(lm,0) && isFingerExtended(lm,1) && isFingerExtended(lm,2) && isFingerExtended(lm,3),
-  G: lm => isFingerExtended(lm,0) && !isFingerExtended(lm,1) && !isFingerExtended(lm,2) && !isFingerExtended(lm,3) && isThumbExtendedAbs(lm) && Math.abs(lm[8].y - lm[4].y) < 0.06,
-  H: lm => isFingerExtended(lm,0) && isFingerExtended(lm,1) && !isFingerExtended(lm,2) && !isFingerExtended(lm,3) && fingersTogether(lm,0,1),
-  I: lm => !isFingerExtended(lm,0) && !isFingerExtended(lm,1) && !isFingerExtended(lm,2) && isFingerExtended(lm,3),
-  J: lm => !isFingerExtended(lm,0) && !isFingerExtended(lm,1) && !isFingerExtended(lm,2) && isFingerExtended(lm,3), // J=I + motion, simplified
-  K: lm => isFingerExtended(lm,0) && isFingerExtended(lm,1) && !isFingerExtended(lm,2) && !isFingerExtended(lm,3) && lm[4].y < lm[6].y + 0.03,
-  L: lm => isFingerExtended(lm,0) && !isFingerExtended(lm,1) && !isFingerExtended(lm,2) && !isFingerExtended(lm,3) && isThumbExtendedAbs(lm),
-  M: lm => !isFingerExtended(lm,0)&&!isFingerExtended(lm,1)&&!isFingerExtended(lm,2)&&!isFingerExtended(lm,3) && lm[8].y > lm[4].y && lm[12].y > lm[4].y && lm[16].y > lm[4].y,
-  N: lm => !isFingerExtended(lm,0)&&!isFingerExtended(lm,1)&&!isFingerExtended(lm,2)&&!isFingerExtended(lm,3) && lm[8].y > lm[4].y && lm[12].y > lm[4].y && lm[16].y < lm[4].y,
-  O: lm => {
-    const d = dist2d(lm[4],lm[8]);
-    return d < 0.09 && !isFingerExtended(lm,0)&&!isFingerExtended(lm,1)&&!isFingerExtended(lm,2)&&!isFingerExtended(lm,3);
-  },
-  P: lm => isFingerExtended(lm,0) && isFingerExtended(lm,1) && !isFingerExtended(lm,2) && !isFingerExtended(lm,3) && lm[8].y > lm[6].y,
-  Q: lm => isFingerExtended(lm,0) && !isFingerExtended(lm,1) && !isFingerExtended(lm,2) && !isFingerExtended(lm,3) && lm[8].y > lm[6].y && isThumbExtendedAbs(lm),
-  R: lm => isFingerExtended(lm,0) && isFingerExtended(lm,1) && !isFingerExtended(lm,2) && !isFingerExtended(lm,3) && dist2d(lm[8],lm[12]) < 0.04,
-  S: lm => isFist(lm) && dist2d(lm[4],lm[8]) < 0.04,
-  T: lm => {
-    const fist = !isFingerExtended(lm,0)&&!isFingerExtended(lm,1)&&!isFingerExtended(lm,2)&&!isFingerExtended(lm,3);
-    return fist && lm[4].y < lm[8].y && lm[4].x > lm[5].x - 0.05 && lm[4].x < lm[5].x + 0.08;
-  },
-  U: lm => isFingerExtended(lm,0) && isFingerExtended(lm,1) && !isFingerExtended(lm,2) && !isFingerExtended(lm,3) && dist2d(lm[8],lm[12]) < 0.05 && lm[8].y < lm[5].y,
-  V: lm => isFingerExtended(lm,0) && isFingerExtended(lm,1) && !isFingerExtended(lm,2) && !isFingerExtended(lm,3) && dist2d(lm[8],lm[12]) > 0.06,
-  W: lm => isFingerExtended(lm,0) && isFingerExtended(lm,1) && isFingerExtended(lm,2) && !isFingerExtended(lm,3),
-  X: lm => {
-    const indexBent = lm[8].y > lm[6].y - 0.01 && lm[8].y < lm[5].y;
-    return indexBent && !isFingerExtended(lm,1)&&!isFingerExtended(lm,2)&&!isFingerExtended(lm,3);
-  },
-  Y: lm => !isFingerExtended(lm,0)&&!isFingerExtended(lm,1)&&!isFingerExtended(lm,2)&&isFingerExtended(lm,3) && isThumbExtendedAbs(lm),
-  Z: lm => isFingerExtended(lm,0) && !isFingerExtended(lm,1) && !isFingerExtended(lm,2) && !isFingerExtended(lm,3) && !isThumbExtendedAbs(lm),
+const SCORE_FN = {
+  A:scoreA, B:scoreB, C:scoreC, D:scoreD, E:scoreE,
+  F:scoreF, G:scoreG, H:scoreH, I:scoreI, J:scoreJ,
+  K:scoreK, L:scoreL, M:scoreM, N:scoreN, O:scoreO,
+  P:scoreP, Q:scoreQ, R:scoreR, S:scoreS, T:scoreT,
+  U:scoreU, V:scoreV, W:scoreW, X:scoreX, Y:scoreY, Z:scoreZ,
 };
+// Minimum confidence threshold per letter (tuned)
+const THRESH = {
+  A:0.72, B:0.72, C:0.60, D:0.72, E:0.72,
+  F:0.72, G:0.70, H:0.72, I:0.72, J:0.72,
+  K:0.68, L:0.72, M:0.70, N:0.68, O:0.72,
+  P:0.68, Q:0.68, R:0.68, S:0.72, T:0.72,
+  U:0.72, V:0.72, W:0.72, X:0.68, Y:0.72, Z:0.68,
+};
+
+// =====================================================================
+// SMOOTHING RING BUFFER  – 12 frames
+// =====================================================================
+const BUFFER_SIZE = 12;
+const scoreBuffer = [];   // each entry: score 0..1 for current letter
+let bufferIdx = 0;
+function initBuffer() {
+  scoreBuffer.length = 0;
+  for (let i=0;i<BUFFER_SIZE;i++) scoreBuffer.push(0);
+  bufferIdx = 0;
+}
+function pushScore(s) {
+  scoreBuffer[bufferIdx % BUFFER_SIZE] = s;
+  bufferIdx++;
+}
+function smoothedScore() {
+  return scoreBuffer.reduce((a,b)=>a+b,0) / BUFFER_SIZE;
+}
 
 // =====================================================================
 // GAME STATE
@@ -626,18 +813,16 @@ const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 let currentIdx = 0;
 let correctCount = 0;
 let wrongCount = 0;
-let results = []; // 'correct','wrong','pending'
-let timerInterval = null;
+let results = [];
 let timerStart = 0;
-const HOLD_TIME = 1500; // ms hand must be held correctly
-const LETTER_TIMEOUT = 8000; // ms per letter max
+const LETTER_TIMEOUT = 9000;
 let holdStart = null;
 let letterTimer = null;
 let processingResult = false;
 let handsReady = false;
 let currentLandmarks = null;
 let consecutiveCorrect = 0;
-const CONSECUTIVE_NEEDED = 8; // frames in a row
+const CONSECUTIVE_NEEDED = 10; // smoothed frames above threshold
 
 // =====================================================================
 // DOM
@@ -696,6 +881,8 @@ function updateUI() {
 // =====================================================================
 function startLetterTimer() {
   clearTimeout(letterTimer);
+  initBuffer();
+  consecutiveCorrect = 0;
   timerStart = Date.now();
   timerBar.style.transition = `width ${LETTER_TIMEOUT}ms linear`;
   // Force reflow
@@ -762,6 +949,27 @@ function skipLetter() {
 }
 
 // =====================================================================
+// CONFIDENCE BAR (visual feedback)
+// =====================================================================
+function drawConfidenceBar(score, threshold) {
+  const W = canvasEl.width, H = canvasEl.height;
+  const barW = Math.round(W * 0.6);
+  const barH = 14;
+  const x = Math.round((W - barW) / 2);
+  const y = H - 28;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.beginPath(); ctx.roundRect(x-2, y-2, barW+4, barH+4, 6); ctx.fill();
+  const fillW = Math.round(barW * Math.min(score, 1));
+  const color = score >= threshold ? '#6bcb77' : score > threshold*0.6 ? '#f7c948' : '#ff6b6b';
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.roundRect(x, y, Math.max(fillW,0), barH, 5); ctx.fill();
+  const tx = x + Math.round(barW * threshold);
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(tx, y-3); ctx.lineTo(tx, y+barH+3); ctx.stroke();
+}
+
+// =====================================================================
 // HAND DETECTION LOOP
 // =====================================================================
 function onHandResults(results_mp) {
@@ -774,34 +982,39 @@ function onHandResults(results_mp) {
     const lm = results_mp.multiHandLandmarks[0];
     currentLandmarks = lm;
 
-    // Draw skeleton
-    drawConnectors(ctx, lm, HAND_CONNECTIONS, {color:'rgba(78,205,196,0.7)', lineWidth:2});
-    drawLandmarks(ctx, lm, {color:'rgba(247,201,72,0.9)', lineWidth:1, radius:4});
+    drawConnectors(ctx, lm, HAND_CONNECTIONS, {color:'rgba(78,205,196,0.75)', lineWidth:2.5});
+    drawLandmarks(ctx, lm, {color:'rgba(247,201,72,0.95)', lineWidth:1, radius:5});
 
     if (!processingResult && handsReady) {
       const letter = ALPHABET[currentIdx];
-      const check = GESTURE_CHECKS[letter];
-      let detected = false;
-      if (check) {
-        try { detected = check(lm); } catch(e){}
-      }
+      const fn = SCORE_FN[letter];
+      const thresh = THRESH[letter] || 0.7;
+      let rawScore = 0;
+      try { rawScore = fn ? fn(lm) : 0; } catch(e){}
 
-      if (detected) {
+      pushScore(rawScore);
+      const smooth = smoothedScore();
+
+      drawConfidenceBar(smooth, thresh);
+
+      if (smooth >= thresh) {
         consecutiveCorrect++;
-        detectionLabel.textContent = `${letter} erkannt… ${Math.min(consecutiveCorrect, CONSECUTIVE_NEEDED)}/${CONSECUTIVE_NEEDED} ✋`;
+        detectionLabel.textContent = `✋ ${letter} erkannt! ${consecutiveCorrect}/${CONSECUTIVE_NEEDED}`;
         detectionLabel.style.color = '#6bcb77';
         if (consecutiveCorrect >= CONSECUTIVE_NEEDED) {
           markResult('correct');
         }
       } else {
         consecutiveCorrect = 0;
-        detectionLabel.textContent = `Zeige: ${letter}`;
-        detectionLabel.style.color = '#fff';
+        const pct = Math.round(smooth * 100);
+        detectionLabel.textContent = `Zeige: ${letter}  (${pct}%)`;
+        detectionLabel.style.color = smooth > thresh * 0.6 ? '#f7c948' : '#fff';
       }
     }
   } else {
     currentLandmarks = null;
     consecutiveCorrect = 0;
+    pushScore(0);
     detectionLabel.textContent = 'Hand nicht sichtbar';
     detectionLabel.style.color = 'var(--muted)';
   }
@@ -870,6 +1083,7 @@ function resetGame() {
   currentIdx = 0; correctCount = 0; wrongCount = 0;
   results = []; processingResult = false; consecutiveCorrect = 0; holdStart = null;
   clearTimeout(letterTimer);
+  initBuffer();
   mainArea.style.display = '';
   finishScreen.classList.remove('active');
   document.getElementById('progress-bar').style.width = '0%';
@@ -902,6 +1116,7 @@ function launchConfetti() {
 // =====================================================================
 window.addEventListener('DOMContentLoaded', () => {
   ALPHABET.forEach(() => results.push('pending'));
+  initBuffer();
   initHands();
 });
 </script>
