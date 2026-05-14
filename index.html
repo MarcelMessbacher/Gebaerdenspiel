@@ -675,16 +675,21 @@ function scoreI(lm) {
 // J = I with motion – we accept I shape
 function scoreJ(lm) { return scoreI(lm); }
 function scoreK(lm) {
-  // Index+middle extended & spread; thumb near middle finger area; ring+pinky down
+  // Index+middle extended & spread; thumb zwischen/neben Zeige-Mittelfinger; ring+pinky unten
   const idxUp = ext(lm,0), midUp = ext(lm,1);
-  // Ring and pinky: tips should be below their MCPs (not necessarily fully curled)
+  if (!idxUp || !midUp) return 0;
+  // Ring und Kleinfinger müssen unten sein
   const ringDown = lm[16].y > lm[13].y - 0.03;
   const pinkDown = lm[20].y > lm[17].y - 0.03;
-  if (!ringDown || !pinkDown) return 0; // hard require
+  if (!ringDown || !pinkDown) return 0;
   const spread_ = spread(lm,8,12) > 0.10;
-  // Thumb near middle finger (pip or dip area) – use broader target
-  const thumbNearMid = tipDist(lm,4,11) < 0.42 || tipDist(lm,4,10) < 0.42;
-  if (!thumbNearMid) return 0; // hard require thumb contact
+  // Daumen irgendwo im Bereich zwischen Zeigefinger-MCP und Mittelfinger-PIP
+  // Breites Netz: nah an Zeigefinger-PIP (6), Mittelfinger-PIP (10), oder MCP-Bereich (5,9)
+  const thumbNear = tipDist(lm,4,6)  < 0.45
+                 || tipDist(lm,4,10) < 0.45
+                 || tipDist(lm,4,5)  < 0.40
+                 || tipDist(lm,4,9)  < 0.40;
+  if (!thumbNear) return 0;
   return (idxUp?0.35:0)+(midUp?0.30:0)+(ringDown?0.15:0)+(pinkDown?0.10:0)+(spread_?0.10:0);
 }
 function scoreL(lm) {
@@ -786,15 +791,13 @@ function scoreU(lm) {
   // Index+middle extended together upward, ring+pinky NOT extended
   // KEY DIFFERENCE from V: fingers must NOT be clearly spread
   const idxUp = ext(lm,0), midUp = ext(lm,1);
-  if (!idxUp || !midUp) return 0; // hard require both fingers up
-  // Ring and pinky: not extended (don't need to be deeply curled)
+  if (!idxUp || !midUp) return 0;
   const ringNotExt = !ext(lm,2);
   const pinkNotExt = !ext(lm,3);
   const spreadVal = spread(lm,8,12);
-  const notSpread = spreadVal < 0.28;  // generous: not clearly V-spread
-  const close = spreadVal < 0.20;      // bonus for being close
-  const pointsUp = lm[8].y < lm[5].y - 0.05 && lm[12].y < lm[9].y - 0.05;
-  if (spreadVal > 0.30) return 0; // hard reject only if very clearly V-spread
+  const notSpread = spreadVal < 0.31;
+  const close = spreadVal < 0.22;
+  if (spreadVal > 0.33) return 0; // hard reject nur wenn eindeutig V-gespreizt
   return (idxUp?0.30:0)+(midUp?0.30:0)+(ringNotExt?0.15:0)+(pinkNotExt?0.10:0)+(notSpread?0.10:0)+(close?0.05:0);
 }
 function scoreV(lm) {
@@ -842,19 +845,21 @@ function scoreY(lm) {
   return (thumbOut?0.3:0)+(pinkyUp?0.3:0)+(rest?0.25:0)+(spread_?0.15:0);
 }
 function scoreZ(lm) {
-  // Z = nur Zeigefinger klar oben und gestreckt; Mittel/Ring/Kleinfinger eingekrümmt
-  const idxUp     = ext(lm,0) && lm[8].y < lm[5].y - 0.05; // index klar oben
-  // Curl-Werte etwas entspannter als vorher
+  // Z = Zeigefinger gestreckt + Z-Bewegung in der Luft
+  // Statische Pose: nur Zeigefinger oben, Rest eingekrümmt, Daumen nicht ausgestreckt
+  const idxUp      = ext(lm,0) && lm[8].y < lm[5].y - 0.04;
   const midCurled  = curl(lm,1) < 130;
   const ringCurled = curl(lm,2) < 130;
   const pinkCurled = curl(lm,3) < 130;
   if (!midCurled || !ringCurled || !pinkCurled) return 0;
-  // Daumen nicht ausgestreckt (kein L)
-  const thumbIn = !thumbExt(lm);
-  if (!thumbIn) return 0;
-  // Bonus: Mittel/Ring/Kleinfinger wirklich tief eingekrümmt
-  const deepCurl = curl(lm,1) < 110 && curl(lm,2) < 110;
-  return (idxUp?0.60:0)+(midCurled?0.14:0)+(ringCurled?0.13:0)+(pinkCurled?0.08:0)+(deepCurl?0.05:0);
+  if (thumbExt(lm)) return 0; // kein L
+  if (!idxUp) return 0;
+
+  // Bewegungskomponente: Z-Geste in der Luft
+  const motion = detectZMotion();
+  // Kombination: Pose (0.5) + Bewegung (0.5)
+  const poseScore = (midCurled?0.17:0)+(ringCurled?0.17:0)+(pinkCurled?0.16:0);
+  return 0.50 * poseScore + 0.50 * motion;
 }
 
 const SCORE_FN = {
@@ -870,7 +875,7 @@ const THRESH = {
   F:0.68, G:0.65, H:0.72, I:0.72, J:0.72,
   K:0.65, L:0.68, M:0.58, N:0.58, O:0.68,
   P:0.62, Q:0.62, R:0.62, S:0.68, T:0.60,
-  U:0.60, V:0.72, W:0.68, X:0.62, Y:0.68, Z:0.68,
+  U:0.60, V:0.72, W:0.68, X:0.62, Y:0.68, Z:0.55,
 };
 
 // =====================================================================
@@ -883,6 +888,7 @@ function initBuffer() {
   scoreBuffer.length = 0;
   for (let i=0;i<BUFFER_SIZE;i++) scoreBuffer.push(0);
   bufferIdx = 0;
+  motionBuf.length = 0; // reset motion buffer too
 }
 function pushScore(s) {
   scoreBuffer[bufferIdx % BUFFER_SIZE] = s;
@@ -890,6 +896,70 @@ function pushScore(s) {
 }
 function smoothedScore() {
   return scoreBuffer.reduce((a,b)=>a+b,0) / BUFFER_SIZE;
+}
+
+// =====================================================================
+// MOTION BUFFER – für Z (Zeigefinger-Tip Position über Zeit)
+// =====================================================================
+const MOTION_BUF_SIZE = 30; // ~1 Sekunde bei ~30fps
+const motionBuf = []; // {x, y} normalisierte Koordinaten des Zeigefinger-Tips
+
+function pushMotion(lm) {
+  if (!lm) return;
+  motionBuf.push({ x: lm[8].x, y: lm[8].y });
+  if (motionBuf.length > MOTION_BUF_SIZE) motionBuf.shift();
+}
+
+// Prüft ob in den letzten Frames eine Z-Bewegung stattfand:
+// Phase 1: Bewegung nach rechts (negatives x wegen Mirror)
+// Phase 2: Bewegung diagonal nach unten-links
+// Phase 3: Bewegung nach rechts
+function detectZMotion() {
+  if (motionBuf.length < 15) return 0;
+  const buf = motionBuf;
+  const n = buf.length;
+
+  // Gesamte x-Bewegungsspanne muss ausreichend groß sein
+  const xs = buf.map(p => p.x);
+  const xMin = Math.min(...xs), xMax = Math.max(...xs);
+  const xRange = xMax - xMin;
+  if (xRange < 0.12) return 0; // zu wenig horizontale Bewegung
+
+  // Gesamte y-Bewegungsspanne muss vorhanden sein (Z geht auch vertikal)
+  const ys = buf.map(p => p.y);
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const yRange = yMax - yMin;
+  if (yRange < 0.06) return 0; // zu wenig vertikale Bewegung
+
+  // Grobe Phasenprüfung: teile Buffer in 3 Drittel
+  const t1 = buf.slice(0, Math.floor(n/3));
+  const t2 = buf.slice(Math.floor(n/3), Math.floor(2*n/3));
+  const t3 = buf.slice(Math.floor(2*n/3));
+
+  const avgX = seg => seg.reduce((s,p)=>s+p.x,0)/seg.length;
+  const avgY = seg => seg.reduce((s,p)=>s+p.y,0)/seg.length;
+
+  // In gespiegelter Kamera: x ist gespiegelt, daher Bewegung "nach rechts" = x nimmt ab
+  // Phase 1 (oben): x geht nach links im Frame (= rechts in Realität, x kleiner)
+  // Phase 2 (diagonal): x geht nach rechts im Frame, y nimmt zu (nach unten)
+  // Phase 3 (unten): x geht nach links im Frame wieder
+  // Wir prüfen vereinfacht: Anfang und Ende haben ähnlichen x-Bereich,
+  // die Mitte ist auf der gegenüberliegenden Seite, und y steigt insgesamt.
+
+  const x1 = avgX(t1), x2 = avgX(t2), x3 = avgX(t3);
+  const y1 = avgY(t1), y3 = avgY(t3);
+
+  // y muss insgesamt nach unten (größer werden)
+  const goesDown = y3 > y1 + 0.04;
+  // x-Muster: t1 und t3 auf einer Seite, t2 auf der anderen
+  // (oder zumindest genug x-Variation)
+  const xVariation = Math.abs(x2 - x1) > 0.06 || Math.abs(x2 - x3) > 0.06;
+
+  if (!goesDown || !xVariation) return 0;
+
+  // Score basierend auf Bewegungsgröße
+  const motionScore = Math.min(1, (xRange / 0.25) * 0.6 + (yRange / 0.15) * 0.4);
+  return motionScore;
 }
 
 // =====================================================================
@@ -1075,6 +1145,9 @@ function onHandResults(results_mp) {
   if (results_mp.multiHandLandmarks && results_mp.multiHandLandmarks.length > 0) {
     const lm = results_mp.multiHandLandmarks[0];
     currentLandmarks = lm;
+
+    // Immer Bewegungsdaten sammeln (für Z-Erkennung)
+    pushMotion(lm);
 
     drawConnectors(ctx, lm, HAND_CONNECTIONS, {color:'rgba(78,205,196,0.75)', lineWidth:2.5});
     drawLandmarks(ctx, lm, {color:'rgba(247,201,72,0.95)', lineWidth:1, radius:5});
