@@ -845,8 +845,7 @@ function scoreY(lm) {
   return (thumbOut?0.3:0)+(pinkyUp?0.3:0)+(rest?0.25:0)+(spread_?0.15:0);
 }
 function scoreZ(lm) {
-  // Z = Zeigefinger gestreckt + Z-Bewegung in der Luft
-  // Statische Pose: nur Zeigefinger oben, Rest eingekrümmt, Daumen nicht ausgestreckt
+  // Z = Zeigefinger gestreckt + Z-Bewegung in der Luft zeichnen
   const idxUp      = ext(lm,0) && lm[8].y < lm[5].y - 0.04;
   const midCurled  = curl(lm,1) < 130;
   const ringCurled = curl(lm,2) < 130;
@@ -855,11 +854,15 @@ function scoreZ(lm) {
   if (thumbExt(lm)) return 0; // kein L
   if (!idxUp) return 0;
 
-  // Bewegungskomponente: Z-Geste in der Luft
   const motion = detectZMotion();
-  // Kombination: Pose (0.5) + Bewegung (0.5)
-  const poseScore = (midCurled?0.17:0)+(ringCurled?0.17:0)+(pinkCurled?0.16:0);
-  return 0.50 * poseScore + 0.50 * motion;
+  if (motion === 0) return 0; // ohne Bewegung kein Z
+
+  // Wenn volle Bewegung erkannt → Buffer leeren damit es nicht zweimal feuert
+  if (motion >= 1.0) motionBuf.length = 0;
+
+  // Pose ist Pflicht (hard rejects oben), Bewegung gibt den Score
+  const poseBonus = (midCurled?0.1:0) + (ringCurled?0.1:0) + (pinkCurled?0.1:0);
+  return motion * 0.70 + poseBonus;
 }
 
 const SCORE_FN = {
@@ -875,7 +878,7 @@ const THRESH = {
   F:0.68, G:0.65, H:0.72, I:0.72, J:0.72,
   K:0.65, L:0.68, M:0.58, N:0.58, O:0.68,
   P:0.62, Q:0.62, R:0.62, S:0.68, T:0.60,
-  U:0.60, V:0.72, W:0.68, X:0.62, Y:0.68, Z:0.55,
+  U:0.60, V:0.72, W:0.68, X:0.62, Y:0.68, Z:0.60,
 };
 
 // =====================================================================
@@ -910,56 +913,69 @@ function pushMotion(lm) {
   if (motionBuf.length > MOTION_BUF_SIZE) motionBuf.shift();
 }
 
-// Prüft ob in den letzten Frames eine Z-Bewegung stattfand:
-// Phase 1: Bewegung nach rechts (negatives x wegen Mirror)
-// Phase 2: Bewegung diagonal nach unten-links
-// Phase 3: Bewegung nach rechts
+// Z-Bewegungserkennung per Richtungssequenz.
+// Ein Z besteht aus 3 Phasen:
+//   Phase 1: horizontal (links oder rechts – je nach Spiegelung)
+//   Phase 2: diagonal entgegengesetzt + nach unten
+//   Phase 3: horizontal wie Phase 1
+// Wir leiten Frame-für-Frame Richtungsvektoren ab und suchen das Muster.
 function detectZMotion() {
-  if (motionBuf.length < 15) return 0;
-  const buf = motionBuf;
-  const n = buf.length;
+  if (motionBuf.length < 12) return 0;
 
-  // Gesamte x-Bewegungsspanne muss ausreichend groß sein
-  const xs = buf.map(p => p.x);
-  const xMin = Math.min(...xs), xMax = Math.max(...xs);
-  const xRange = xMax - xMin;
-  if (xRange < 0.12) return 0; // zu wenig horizontale Bewegung
+  // Richtungsvektoren zwischen je 3 Frames (geglättet)
+  const dirs = [];
+  const step = 2;
+  for (let i = step; i < motionBuf.length; i++) {
+    const dx = motionBuf[i].x - motionBuf[i - step].x;
+    const dy = motionBuf[i].y - motionBuf[i - step].y;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    if (len > 0.005) dirs.push({ dx: dx/len, dy: dy/len, len });
+  }
+  if (dirs.length < 6) return 0;
 
-  // Gesamte y-Bewegungsspanne muss vorhanden sein (Z geht auch vertikal)
-  const ys = buf.map(p => p.y);
-  const yMin = Math.min(...ys), yMax = Math.max(...ys);
-  const yRange = yMax - yMin;
-  if (yRange < 0.06) return 0; // zu wenig vertikale Bewegung
+  // Gesamtbewegung muss ausreichend sein
+  const totalLen = dirs.reduce((s, d) => s + d.len, 0);
+  if (totalLen < 0.15) return 0;
 
-  // Grobe Phasenprüfung: teile Buffer in 3 Drittel
-  const t1 = buf.slice(0, Math.floor(n/3));
-  const t2 = buf.slice(Math.floor(n/3), Math.floor(2*n/3));
-  const t3 = buf.slice(Math.floor(2*n/3));
+  // Klassifiziere jede Richtung: R(ight)/L(eft)/D(own-diagonal)
+  // In MediaPipe: x steigt nach rechts im normierten Frame (gespiegelt = links in Realität)
+  // Wir schauen nur ob x-Bewegung dominant ist oder diagonal-down
+  const classify = d => {
+    const absDx = Math.abs(d.dx), absDy = Math.abs(d.dy);
+    if (absDx > 0.6 && absDy < 0.5) return d.dx > 0 ? 'R' : 'L'; // horizontal
+    if (absDy > 0.4 && d.dy > 0)    return 'D'; // nach unten (diagonal ok)
+    return '?';
+  };
 
-  const avgX = seg => seg.reduce((s,p)=>s+p.x,0)/seg.length;
-  const avgY = seg => seg.reduce((s,p)=>s+p.y,0)/seg.length;
+  const seq = dirs.map(classify).filter(c => c !== '?');
+  if (seq.length < 4) return 0;
 
-  // In gespiegelter Kamera: x ist gespiegelt, daher Bewegung "nach rechts" = x nimmt ab
-  // Phase 1 (oben): x geht nach links im Frame (= rechts in Realität, x kleiner)
-  // Phase 2 (diagonal): x geht nach rechts im Frame, y nimmt zu (nach unten)
-  // Phase 3 (unten): x geht nach links im Frame wieder
-  // Wir prüfen vereinfacht: Anfang und Ende haben ähnlichen x-Bereich,
-  // die Mitte ist auf der gegenüberliegenden Seite, und y steigt insgesamt.
+  // Zusammenfassen: aufeinanderfolgende gleiche Richtungen zu einem Eintrag
+  const collapsed = [seq[0]];
+  for (let i = 1; i < seq.length; i++) {
+    if (seq[i] !== collapsed[collapsed.length - 1]) collapsed.push(seq[i]);
+  }
 
-  const x1 = avgX(t1), x2 = avgX(t2), x3 = avgX(t3);
-  const y1 = avgY(t1), y3 = avgY(t3);
+  // Z-Muster: H → D → H  (H = horizontal, egal ob L oder R, aber Phase 1 & 3 gleich)
+  // Akzeptiere: L-D-L, R-D-R, L-D-R, R-D-L (beide Orientierungen)
+  let zScore = 0;
+  for (let i = 0; i + 2 < collapsed.length; i++) {
+    const a = collapsed[i], b = collapsed[i+1], c = collapsed[i+2];
+    const isH = x => x === 'L' || x === 'R';
+    if (isH(a) && b === 'D' && isH(c)) {
+      zScore = 1.0;
+      break;
+    }
+  }
 
-  // y muss insgesamt nach unten (größer werden)
-  const goesDown = y3 > y1 + 0.04;
-  // x-Muster: t1 und t3 auf einer Seite, t2 auf der anderen
-  // (oder zumindest genug x-Variation)
-  const xVariation = Math.abs(x2 - x1) > 0.06 || Math.abs(x2 - x3) > 0.06;
+  // Fallback: zumindest Richtungswechsel mit Down-Komponente vorhanden
+  if (zScore === 0) {
+    const hasDown = collapsed.includes('D');
+    const hasH    = collapsed.some(c => c === 'L' || c === 'R');
+    if (hasDown && hasH && totalLen > 0.20) zScore = 0.5;
+  }
 
-  if (!goesDown || !xVariation) return 0;
-
-  // Score basierend auf Bewegungsgröße
-  const motionScore = Math.min(1, (xRange / 0.25) * 0.6 + (yRange / 0.15) * 0.4);
-  return motionScore;
+  return zScore;
 }
 
 // =====================================================================
