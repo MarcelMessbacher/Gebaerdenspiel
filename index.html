@@ -598,11 +598,15 @@ function scoreA(lm) {
   return (fist ? 0.7 : 0) + (thumbSide ? 0.3 : 0);
 }
 function scoreB(lm) {
-  // 4 fingers fully extended & together, thumb tucked across palm
+  // 4 fingers fully extended & together, thumb tucked/folded across palm (NOT extended)
   const fingersUp = [0,1,2,3].every(f => ext(lm,f));
-  const thumbIn = thumbCurled(lm) || lm[4].x > lm[5].x - 0.02;
+  // Thumb must be folded in: tip should be near the palm, NOT sticking out sideways
+  // thumbExt would be true if thumb is out — we require it's NOT extended
+  const thumbFolded = !thumbExt(lm) && lm[4].y > lm[3].y - 0.02; // tip not above ip joint
+  const thumbNearPalm = lm[4].x > lm[5].x - 0.10; // thumb tip close to index MCP area
   const together = spread(lm,8,20) < 0.35;
-  return (fingersUp?0.5:0) + (thumbIn?0.3:0) + (together?0.2:0);
+  if (!thumbFolded) return 0; // hard require thumb tucked
+  return (fingersUp?0.55:0) + (thumbFolded?0.25:0) + (together?0.2:0);
 }
 function scoreC(lm) {
   // All fingers moderately bent (not flat, not fist) forming arc
@@ -760,42 +764,47 @@ function scoreS(lm) {
   return (fist?0.65:0)+(thumbAcross?0.35:0);
 }
 function scoreT(lm) {
-  // All fingers folded into fist. Thumb tip pokes between index MCP and middle MCP.
+  // All fingers folded into fist. Thumb tip pokes between/over index finger.
   const idxDown  = lm[8].y  > lm[5].y  - 0.01;
   const midDown  = lm[12].y > lm[9].y  - 0.01;
   const ringDown = lm[16].y > lm[13].y - 0.01;
   const pinkDown = lm[20].y > lm[17].y - 0.01;
   const allDown  = idxDown && midDown && ringDown && pinkDown;
-  // Thumb tip between index and middle MCP (x-range), and at/above index pip height
-  const thumbAbovePalm = lm[4].y < lm[6].y + 0.06; // thumb up into fist
-  const thumbInRange   = lm[4].x > Math.min(lm[5].x,lm[9].x) - 0.06
-                      && lm[4].x < Math.max(lm[5].x,lm[9].x) + 0.06;
-  return (allDown?0.50:0)+(thumbAbovePalm?0.30:0)+(thumbInRange?0.20:0);
+  if (!allDown) return 0; // hard require fist
+  // Thumb tip should be tucked up between/under index finger
+  // It should be: above wrist y-level, and in the x-range of the fist
+  const thumbUp = lm[4].y < lm[0].y - 0.05; // thumb not hanging down near wrist
+  const thumbInFist = lm[4].y < lm[8].y + 0.03; // thumb roughly at or above index tip
+  const thumbXOk = lm[4].x > lm[17].x - 0.06 && lm[4].x < lm[5].x + 0.10; // within palm width
+  return (allDown?0.45:0)+(thumbUp?0.25:0)+(thumbInFist?0.20:0)+(thumbXOk?0.10:0);
 }
 function scoreU(lm) {
-  // Index+middle extended together upward, ring+pinky down
+  // Index+middle extended together upward, ring+pinky NOT extended
   // KEY DIFFERENCE from V: fingers must NOT be clearly spread
   const idxUp = ext(lm,0), midUp = ext(lm,1);
-  // Ring and pinky should be below their MCPs (not necessarily fully curled)
-  const ringDown = lm[16].y > lm[13].y - 0.02;
-  const pinkDown = lm[20].y > lm[17].y - 0.02;
+  if (!idxUp || !midUp) return 0; // hard require both fingers up
+  // Ring and pinky: not extended (don't need to be deeply curled)
+  const ringNotExt = !ext(lm,2);
+  const pinkNotExt = !ext(lm,3);
   const spreadVal = spread(lm,8,12);
-  const together = spreadVal < 0.20;   // relaxed: not clearly spread
-  const veryClose = spreadVal < 0.14;  // bonus for very close
-  const pointsUp = lm[8].y < lm[5].y && lm[12].y < lm[9].y;
-  if (spreadVal > 0.22) return 0; // hard reject only if clearly V-spread
-  if (!ringDown || !pinkDown) return 0;
-  return (idxUp?0.28:0)+(midUp?0.28:0)+(ringDown?0.12:0)+(pinkDown?0.10:0)+(together?0.12:0)+(veryClose?0.05:0)+(pointsUp?0.05:0);
+  const notSpread = spreadVal < 0.22;  // not V-spread
+  const close = spreadVal < 0.16;      // bonus for being close
+  const pointsUp = lm[8].y < lm[5].y - 0.05 && lm[12].y < lm[9].y - 0.05;
+  if (spreadVal > 0.24) return 0; // hard reject if clearly V-spread
+  return (idxUp?0.30:0)+(midUp?0.30:0)+(ringNotExt?0.15:0)+(pinkNotExt?0.10:0)+(notSpread?0.10:0)+(close?0.05:0);
 }
 function scoreV(lm) {
-  // Index+middle extended & clearly spread apart (Friedenszeichen)
-  // KEY DIFFERENCE from U: fingers must be SPREAD (not together)
+  // Index+middle extended & CLEARLY spread apart (Friedenszeichen / V)
   const idxUp = ext(lm,0), midUp = ext(lm,1);
-  const rest = [2,3].every(f=>curled(lm,f));
+  if (!idxUp || !midUp) return 0;
+  // Ring and pinky must NOT be extended
+  const ringNotExt = !ext(lm,2);
+  const pinkNotExt = !ext(lm,3);
+  if (!ringNotExt || !pinkNotExt) return 0; // hard reject if other fingers up
   const spreadVal = spread(lm,8,12);
-  const spread_ = spreadVal > 0.22; // must be clearly spread
-  if (!spread_) return 0; // hard reject if fingers are close together
-  return (idxUp?0.3:0)+(midUp?0.3:0)+(rest?0.2:0)+(spread_?0.2:0);
+  if (spreadVal < 0.22) return 0; // hard reject if not clearly spread
+  const wideSpread = spreadVal > 0.28; // bonus for clearly V-shape
+  return (idxUp?0.30:0)+(midUp?0.30:0)+(ringNotExt?0.18:0)+(pinkNotExt?0.12:0)+(wideSpread?0.10:0);
 }
 function scoreW(lm) {
   // Index, middle AND ring all FULLY extended and spread; pinky folded down
@@ -828,15 +837,19 @@ function scoreY(lm) {
   const spread_ = tipDist(lm,4,20) > 0.35;
   return (thumbOut?0.3:0)+(pinkyUp?0.3:0)+(rest?0.25:0)+(spread_?0.15:0);
 }
-// Z = pointing index (like drawing a Z). Static: index tip well above MCP, others down.
 function scoreZ(lm) {
-  const idxUp    = lm[8].y  < lm[5].y  - 0.04; // index clearly up
-  const midDown  = lm[12].y > lm[9].y  - 0.02;
-  const ringDown = lm[16].y > lm[13].y - 0.02;
-  const pinkDown = lm[20].y > lm[17].y - 0.02;
-  // Thumb doesn't need to be fully curled – just not extended far
-  const thumbNotOut = !thumbExt(lm) || thumbCurl(lm) < 160;
-  return (idxUp?0.50:0)+(midDown?0.18:0)+(ringDown?0.14:0)+(pinkDown?0.10:0)+(thumbNotOut?0.08:0);
+  // Z = only index clearly up and straight; middle/ring/pinky clearly curled (not just down)
+  // Since motion can't be detected, we require a very strict static pose
+  const idxUp    = ext(lm,0) && lm[8].y < lm[5].y - 0.08; // index well above MCP
+  // Middle, ring, pinky must be genuinely curled (not just below MCP)
+  const midCurled  = curl(lm,1) < 120;
+  const ringCurled = curl(lm,2) < 120;
+  const pinkCurled = curl(lm,3) < 120;
+  if (!midCurled || !ringCurled || !pinkCurled) return 0; // hard require
+  // Thumb should be tucked/curled too (not extended sideways like L)
+  const thumbIn = !thumbExt(lm);
+  if (!thumbIn) return 0; // hard reject L-shape
+  return (idxUp?0.60:0)+(midCurled?0.15:0)+(ringCurled?0.15:0)+(pinkCurled?0.10:0);
 }
 
 const SCORE_FN = {
@@ -848,11 +861,11 @@ const SCORE_FN = {
 };
 // Minimum confidence threshold per letter (tuned)
 const THRESH = {
-  A:0.68, B:0.68, C:0.55, D:0.60, E:0.68,
+  A:0.68, B:0.72, C:0.55, D:0.60, E:0.68,
   F:0.68, G:0.65, H:0.72, I:0.72, J:0.72,
   K:0.65, L:0.68, M:0.58, N:0.58, O:0.68,
-  P:0.62, Q:0.62, R:0.62, S:0.68, T:0.58,
-  U:0.62, V:0.70, W:0.68, X:0.62, Y:0.68, Z:0.58,
+  P:0.62, Q:0.62, R:0.62, S:0.68, T:0.55,
+  U:0.60, V:0.72, W:0.68, X:0.62, Y:0.68, Z:0.78,
 };
 
 // =====================================================================
