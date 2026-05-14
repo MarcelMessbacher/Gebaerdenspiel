@@ -671,15 +671,17 @@ function scoreI(lm) {
 // J = I with motion – we accept I shape
 function scoreJ(lm) { return scoreI(lm); }
 function scoreK(lm) {
-  // Index+middle extended & spread; thumb MUST touch middle pip; ring+pinky curled
+  // Index+middle extended & spread; thumb near middle finger area; ring+pinky down
   const idxUp = ext(lm,0), midUp = ext(lm,1);
-  const ringCurled = curl(lm,2) < 120;
-  const pinkCurled = curl(lm,3) < 120;
-  if (!ringCurled || !pinkCurled) return 0; // hard require
-  const spread_ = spread(lm,8,12) > 0.12;
-  const thumbMid = tipDist(lm,4,11) < 0.30; // thumb must be close to middle pip
-  if (!thumbMid) return 0; // hard require thumb contact
-  return (idxUp?0.35:0)+(midUp?0.30:0)+(ringCurled?0.15:0)+(pinkCurled?0.10:0)+(spread_?0.10:0);
+  // Ring and pinky: tips should be below their MCPs (not necessarily fully curled)
+  const ringDown = lm[16].y > lm[13].y - 0.03;
+  const pinkDown = lm[20].y > lm[17].y - 0.03;
+  if (!ringDown || !pinkDown) return 0; // hard require
+  const spread_ = spread(lm,8,12) > 0.10;
+  // Thumb near middle finger (pip or dip area) – use broader target
+  const thumbNearMid = tipDist(lm,4,11) < 0.42 || tipDist(lm,4,10) < 0.42;
+  if (!thumbNearMid) return 0; // hard require thumb contact
+  return (idxUp?0.35:0)+(midUp?0.30:0)+(ringDown?0.15:0)+(pinkDown?0.10:0)+(spread_?0.10:0);
 }
 function scoreL(lm) {
   // Index up, thumb sideways extended, perfect L shape
@@ -771,16 +773,19 @@ function scoreT(lm) {
   return (allDown?0.50:0)+(thumbAbovePalm?0.30:0)+(thumbInRange?0.20:0);
 }
 function scoreU(lm) {
-  // Index+middle extended together upward, rest curled
-  // KEY DIFFERENCE from V: fingers must be CLOSE together (not spread)
+  // Index+middle extended together upward, ring+pinky down
+  // KEY DIFFERENCE from V: fingers must NOT be clearly spread
   const idxUp = ext(lm,0), midUp = ext(lm,1);
-  const rest = [2,3].every(f=>curled(lm,f));
+  // Ring and pinky should be below their MCPs (not necessarily fully curled)
+  const ringDown = lm[16].y > lm[13].y - 0.02;
+  const pinkDown = lm[20].y > lm[17].y - 0.02;
   const spreadVal = spread(lm,8,12);
-  const together = spreadVal < 0.13; // strictly together
-  const notSpread = spreadVal < 0.18; // bonus: not clearly spread
+  const together = spreadVal < 0.20;   // relaxed: not clearly spread
+  const veryClose = spreadVal < 0.14;  // bonus for very close
   const pointsUp = lm[8].y < lm[5].y && lm[12].y < lm[9].y;
-  if (!together) return 0; // hard reject if fingers are spread apart
-  return (idxUp?0.25:0)+(midUp?0.25:0)+(rest?0.2:0)+(together?0.15:0)+(pointsUp?0.15:0);
+  if (spreadVal > 0.22) return 0; // hard reject only if clearly V-spread
+  if (!ringDown || !pinkDown) return 0;
+  return (idxUp?0.28:0)+(midUp?0.28:0)+(ringDown?0.12:0)+(pinkDown?0.10:0)+(together?0.12:0)+(veryClose?0.05:0)+(pointsUp?0.05:0);
 }
 function scoreV(lm) {
   // Index+middle extended & clearly spread apart (Friedenszeichen)
@@ -845,9 +850,9 @@ const SCORE_FN = {
 const THRESH = {
   A:0.68, B:0.68, C:0.55, D:0.60, E:0.68,
   F:0.68, G:0.65, H:0.72, I:0.72, J:0.72,
-  K:0.72, L:0.68, M:0.58, N:0.58, O:0.68,
+  K:0.65, L:0.68, M:0.58, N:0.58, O:0.68,
   P:0.62, Q:0.62, R:0.62, S:0.68, T:0.58,
-  U:0.65, V:0.70, W:0.68, X:0.62, Y:0.68, Z:0.58,
+  U:0.62, V:0.70, W:0.68, X:0.62, Y:0.68, Z:0.58,
 };
 
 // =====================================================================
