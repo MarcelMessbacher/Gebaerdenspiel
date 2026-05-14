@@ -842,18 +842,19 @@ function scoreY(lm) {
   return (thumbOut?0.3:0)+(pinkyUp?0.3:0)+(rest?0.25:0)+(spread_?0.15:0);
 }
 function scoreZ(lm) {
-  // Z = only index clearly up and straight; middle/ring/pinky clearly curled (not just down)
-  // Since motion can't be detected, we require a very strict static pose
-  const idxUp    = ext(lm,0) && lm[8].y < lm[5].y - 0.08; // index well above MCP
-  // Middle, ring, pinky must be genuinely curled (not just below MCP)
-  const midCurled  = curl(lm,1) < 120;
-  const ringCurled = curl(lm,2) < 120;
-  const pinkCurled = curl(lm,3) < 120;
-  if (!midCurled || !ringCurled || !pinkCurled) return 0; // hard require
-  // Thumb should be tucked/curled too (not extended sideways like L)
+  // Z = nur Zeigefinger klar oben und gestreckt; Mittel/Ring/Kleinfinger eingekrümmt
+  const idxUp     = ext(lm,0) && lm[8].y < lm[5].y - 0.05; // index klar oben
+  // Curl-Werte etwas entspannter als vorher
+  const midCurled  = curl(lm,1) < 130;
+  const ringCurled = curl(lm,2) < 130;
+  const pinkCurled = curl(lm,3) < 130;
+  if (!midCurled || !ringCurled || !pinkCurled) return 0;
+  // Daumen nicht ausgestreckt (kein L)
   const thumbIn = !thumbExt(lm);
-  if (!thumbIn) return 0; // hard reject L-shape
-  return (idxUp?0.60:0)+(midCurled?0.15:0)+(ringCurled?0.15:0)+(pinkCurled?0.10:0);
+  if (!thumbIn) return 0;
+  // Bonus: Mittel/Ring/Kleinfinger wirklich tief eingekrümmt
+  const deepCurl = curl(lm,1) < 110 && curl(lm,2) < 110;
+  return (idxUp?0.60:0)+(midCurled?0.14:0)+(ringCurled?0.13:0)+(pinkCurled?0.08:0)+(deepCurl?0.05:0);
 }
 
 const SCORE_FN = {
@@ -869,7 +870,7 @@ const THRESH = {
   F:0.68, G:0.65, H:0.72, I:0.72, J:0.72,
   K:0.65, L:0.68, M:0.58, N:0.58, O:0.68,
   P:0.62, Q:0.62, R:0.62, S:0.68, T:0.60,
-  U:0.60, V:0.72, W:0.68, X:0.62, Y:0.68, Z:0.78,
+  U:0.60, V:0.72, W:0.68, X:0.62, Y:0.68, Z:0.68,
 };
 
 // =====================================================================
