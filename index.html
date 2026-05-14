@@ -416,40 +416,7 @@
     }
     #skip-btn:hover { border-color: var(--text); color: var(--text); }
 
-    /* HINT IMAGE OVERLAY */
-    #hint-overlay {
-      position: absolute;
-      inset: 0;
-      border-radius: var(--radius);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: rgba(15,27,45,0.45);
-      backdrop-filter: blur(2px);
-      z-index: 20;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity 0.4s ease;
-    }
-    #hint-overlay.visible {
-      opacity: 1;
-    }
-    #hint-overlay-label {
-      font-family: 'Fredoka One', cursive;
-      font-size: 1rem;
-      color: var(--accent1);
-      margin-bottom: 8px;
-      letter-spacing: 0.5px;
-    }
-    #hint-canvas {
-      width: 190px;
-      height: 190px;
-      border-radius: 16px;
-      background: rgba(255,255,255,0.10);
-      border: 2px solid rgba(255,255,255,0.25);
-      box-shadow: 0 4px 24px rgba(0,0,0,0.3);
-    }
+
   </style>
 </head>
 <body>
@@ -497,10 +464,7 @@
         <div id="detection-label">Wird erkannt…</div>
       </div>
       <div id="feedback-overlay"></div>
-      <div id="hint-overlay">
-        <div id="hint-overlay-label">💡 So geht's:</div>
-        <canvas id="hint-canvas" width="240" height="240"></canvas>
-      </div>
+
     </div>
 
     <!-- LETTER INFO -->
@@ -681,31 +645,41 @@ function scoreG(lm) {
   return (idxExt?0.35:0)+(rest?0.3:0)+(thumbExt_?0.2:0)+(horiz?0.15:0);
 }
 function scoreH(lm) {
-  // Index+middle extended together sideways, ring+pinky curled
-  const idxMidUp = ext(lm,0)&&ext(lm,1);
-  const rest = [2,3].every(f=>curled(lm,f));
+  // Index+middle extended together SIDEWAYS, ring+pinky clearly curled
+  const idxUp = ext(lm,0), midUp = ext(lm,1);
+  // Ring and pinky must be clearly curled (stricter threshold)
+  const ringCurled = curl(lm,2) < 120;
+  const pinkCurled = curl(lm,3) < 120;
+  const rest = ringCurled && pinkCurled;
   const together = spread(lm,8,12) < 0.22;
-  return (idxMidUp?0.5:0)+(rest?0.3:0)+(together?0.2:0);
+  // H is sideways: tips should NOT point steeply upward
+  // In H the hand is tilted so tips are roughly at same height as wrist or not far above MCP
+  const notTooVertical = !(lm[8].y < lm[5].y - 0.15 && lm[12].y < lm[9].y - 0.15);
+  if (!rest) return 0; // hard require ring+pinky curled
+  return (idxUp?0.4:0)+(midUp?0.3:0)+(together?0.2:0)+(notTooVertical?0.1:0);
 }
 function scoreI(lm) {
-  // Pinky tip clearly above its MCP; index/middle/ring tips below their MCPs
-  const pinkyUp   = lm[20].y < lm[17].y - 0.03;
-  const idxDown   = lm[8].y  > lm[5].y  - 0.01;
-  const midDown   = lm[12].y > lm[9].y  - 0.01;
-  const ringDown  = lm[16].y > lm[13].y - 0.01;
-  // Soft curl check as bonus (not required)
-  const softCurl  = [0,1,2].every(f=>curl(lm,f)<160);
-  return (pinkyUp?0.50:0)+(idxDown?0.18:0)+(midDown?0.14:0)+(ringDown?0.10:0)+(softCurl?0.08:0);
+  // ONLY pinky extended upward; index, middle, ring clearly curled into fist
+  const pinkyUp  = ext(lm,3) && lm[20].y < lm[17].y - 0.04;
+  // Require genuine curl – not just "below MCP" but actually bent
+  const idxCurled  = curl(lm,0) < 130;
+  const midCurled  = curl(lm,1) < 130;
+  const ringCurled = curl(lm,2) < 130;
+  if (!idxCurled || !midCurled || !ringCurled) return 0; // hard reject if any finger is extended
+  return (pinkyUp?0.55:0)+(idxCurled?0.18:0)+(midCurled?0.15:0)+(ringCurled?0.12:0);
 }
 // J = I with motion – we accept I shape
 function scoreJ(lm) { return scoreI(lm); }
 function scoreK(lm) {
-  // Index+middle extended & spread, thumb touches middle pip
+  // Index+middle extended & spread; thumb MUST touch middle pip; ring+pinky curled
   const idxUp = ext(lm,0), midUp = ext(lm,1);
-  const rest = [2,3].every(f=>curled(lm,f));
+  const ringCurled = curl(lm,2) < 120;
+  const pinkCurled = curl(lm,3) < 120;
+  if (!ringCurled || !pinkCurled) return 0; // hard require
   const spread_ = spread(lm,8,12) > 0.12;
-  const thumbMid = tipDist(lm,4,11) < 0.35; // thumb near middle pip
-  return (idxUp?0.3:0)+(midUp?0.3:0)+(rest?0.2:0)+(spread_?0.1:0)+(thumbMid?0.1:0);
+  const thumbMid = tipDist(lm,4,11) < 0.30; // thumb must be close to middle pip
+  if (!thumbMid) return 0; // hard require thumb contact
+  return (idxUp?0.35:0)+(midUp?0.30:0)+(ringCurled?0.15:0)+(pinkCurled?0.10:0)+(spread_?0.10:0);
 }
 function scoreL(lm) {
   // Index up, thumb sideways extended, perfect L shape
@@ -870,8 +844,8 @@ const SCORE_FN = {
 // Minimum confidence threshold per letter (tuned)
 const THRESH = {
   A:0.68, B:0.68, C:0.55, D:0.60, E:0.68,
-  F:0.68, G:0.65, H:0.65, I:0.58, J:0.58,
-  K:0.62, L:0.68, M:0.58, N:0.58, O:0.68,
+  F:0.68, G:0.65, H:0.72, I:0.72, J:0.72,
+  K:0.72, L:0.68, M:0.58, N:0.58, O:0.68,
   P:0.62, Q:0.62, R:0.62, S:0.68, T:0.58,
   U:0.65, V:0.70, W:0.68, X:0.62, Y:0.68, Z:0.58,
 };
@@ -896,233 +870,14 @@ function smoothedScore() {
 }
 
 // =====================================================================
-// HAND LANDMARK TEMPLATES  – normalised [0..1] coords for each letter
-// Based on canonical DGS fingerspell positions (right hand, palm facing camera)
-// Format: 21 points [x, y] each
-// =====================================================================
-// Helper to build a hand pose from finger states
-// We define key landmark positions for each letter as compact arrays
-// Each row: [wrist, thumb_cmc, thumb_mcp, thumb_ip, thumb_tip,
-//            idx_mcp, idx_pip, idx_dip, idx_tip,
-//            mid_mcp, mid_pip, mid_dip, mid_tip,
-//            rng_mcp, rng_pip, rng_dip, rng_tip,
-//            pnk_mcp, pnk_pip, pnk_dip, pnk_tip]
-const HAND_POSES = {
-  A: [[.50,.90],[.40,.75],[.33,.62],[.28,.52],[.26,.45],  [.42,.55],[.40,.40],[.39,.30],[.38,.22],  [.50,.53],[.50,.38],[.50,.28],[.50,.20],  [.58,.55],[.58,.40],[.58,.30],[.58,.23],  [.65,.58],[.67,.46],[.68,.38],[.68,.32]],
-  B: [[.50,.90],[.38,.75],[.30,.62],[.25,.52],[.28,.44],  [.40,.55],[.38,.38],[.37,.25],[.36,.14],  [.49,.53],[.49,.36],[.49,.23],[.49,.12],  [.57,.55],[.57,.38],[.57,.25],[.57,.14],  [.65,.57],[.66,.42],[.67,.30],[.67,.20]],
-  C: [[.50,.90],[.38,.76],[.30,.64],[.26,.54],[.28,.46],  [.41,.55],[.36,.44],[.32,.36],[.30,.30],  [.50,.53],[.46,.42],[.44,.34],[.43,.28],  [.58,.54],[.56,.44],[.55,.36],[.54,.30],  [.65,.57],[.64,.47],[.63,.40],[.62,.35]],
-  D: [[.50,.90],[.40,.75],[.34,.63],[.30,.55],[.27,.47],  [.42,.55],[.40,.38],[.39,.25],[.38,.14],  [.50,.53],[.48,.43],[.47,.38],[.47,.34],  [.58,.54],[.56,.44],[.56,.40],[.55,.36],  [.65,.57],[.64,.48],[.63,.43],[.62,.40]],
-  E: [[.50,.90],[.40,.76],[.34,.64],[.34,.56],[.37,.50],  [.42,.55],[.41,.47],[.40,.43],[.40,.40],  [.50,.53],[.50,.45],[.50,.41],[.50,.38],  [.57,.54],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.50],[.65,.46],[.65,.43]],
-  F: [[.50,.90],[.40,.75],[.34,.63],[.31,.55],[.31,.48],  [.42,.55],[.40,.46],[.37,.40],[.34,.36],  [.50,.53],[.50,.37],[.50,.25],[.50,.14],  [.57,.54],[.57,.38],[.57,.26],[.57,.15],  [.65,.57],[.66,.43],[.67,.32],[.67,.22]],
-  G: [[.50,.90],[.42,.76],[.38,.65],[.36,.56],[.34,.49],  [.44,.55],[.42,.46],[.40,.38],[.38,.31],  [.52,.53],[.50,.47],[.49,.44],[.48,.41],  [.59,.55],[.58,.48],[.58,.44],[.57,.41],  [.66,.57],[.66,.51],[.66,.47],[.66,.44]],
-  H: [[.50,.90],[.40,.75],[.33,.62],[.28,.52],[.26,.45],  [.42,.55],[.40,.40],[.39,.28],[.38,.18],  [.50,.53],[.49,.38],[.49,.26],[.49,.16],  [.57,.55],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  I: [[.50,.90],[.40,.75],[.34,.63],[.32,.54],[.33,.47],  [.42,.55],[.41,.46],[.40,.42],[.40,.39],  [.50,.53],[.49,.45],[.49,.41],[.49,.38],  [.57,.54],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.43],[.66,.31],[.66,.20]],
-  J: [[.50,.90],[.40,.75],[.34,.63],[.32,.54],[.33,.47],  [.42,.55],[.41,.46],[.40,.42],[.40,.39],  [.50,.53],[.49,.45],[.49,.41],[.49,.38],  [.57,.54],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.43],[.66,.31],[.66,.20]],
-  K: [[.50,.90],[.40,.75],[.36,.64],[.35,.55],[.36,.48],  [.42,.55],[.40,.40],[.39,.28],[.38,.18],  [.50,.53],[.48,.38],[.47,.26],[.47,.16],  [.57,.55],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  L: [[.50,.90],[.42,.75],[.38,.62],[.34,.51],[.30,.44],  [.42,.55],[.40,.38],[.39,.25],[.38,.14],  [.50,.53],[.50,.45],[.50,.41],[.50,.38],  [.57,.54],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  M: [[.50,.90],[.40,.76],[.36,.65],[.36,.57],[.40,.52],  [.42,.55],[.41,.50],[.41,.48],[.41,.46],  [.50,.53],[.50,.48],[.50,.46],[.50,.44],  [.57,.54],[.57,.49],[.57,.47],[.57,.45],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  N: [[.50,.90],[.40,.76],[.36,.65],[.36,.57],[.40,.52],  [.42,.55],[.41,.50],[.41,.48],[.41,.46],  [.50,.53],[.50,.48],[.50,.46],[.50,.44],  [.57,.54],[.57,.47],[.57,.44],[.57,.42],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  O: [[.50,.90],[.40,.75],[.34,.63],[.31,.55],[.33,.49],  [.42,.55],[.40,.46],[.37,.40],[.35,.36],  [.50,.53],[.48,.44],[.47,.38],[.46,.34],  [.57,.54],[.56,.45],[.55,.39],[.54,.35],  [.64,.57],[.64,.49],[.63,.43],[.62,.39]],
-  P: [[.50,.90],[.40,.75],[.36,.64],[.35,.55],[.36,.48],  [.42,.55],[.42,.62],[.42,.70],[.42,.77],  [.50,.53],[.49,.61],[.49,.69],[.49,.77],  [.57,.55],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  Q: [[.50,.90],[.42,.75],[.40,.65],[.38,.58],[.36,.52],  [.44,.55],[.44,.62],[.44,.70],[.44,.77],  [.52,.53],[.52,.47],[.52,.44],[.52,.41],  [.59,.55],[.58,.48],[.58,.44],[.57,.41],  [.66,.57],[.66,.51],[.66,.47],[.66,.44]],
-  R: [[.50,.90],[.40,.75],[.33,.62],[.28,.52],[.26,.45],  [.42,.55],[.40,.40],[.39,.28],[.38,.18],  [.50,.53],[.49,.38],[.49,.26],[.50,.16],  [.57,.55],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  S: [[.50,.90],[.40,.75],[.36,.64],[.38,.56],[.42,.52],  [.42,.55],[.40,.47],[.40,.43],[.40,.40],  [.50,.53],[.50,.45],[.50,.41],[.50,.38],  [.57,.54],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  T: [[.50,.90],[.40,.75],[.38,.65],[.40,.57],[.43,.51],  [.42,.55],[.41,.47],[.40,.43],[.40,.40],  [.50,.53],[.50,.45],[.50,.41],[.50,.38],  [.57,.54],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  U: [[.50,.90],[.40,.75],[.33,.62],[.28,.52],[.26,.45],  [.44,.55],[.42,.40],[.41,.28],[.41,.18],  [.50,.53],[.49,.38],[.49,.26],[.49,.16],  [.57,.55],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  V: [[.50,.90],[.40,.75],[.33,.62],[.28,.52],[.26,.45],  [.40,.55],[.37,.40],[.35,.28],[.33,.18],  [.50,.53],[.50,.38],[.50,.26],[.50,.16],  [.57,.55],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  W: [[.50,.90],[.40,.75],[.33,.62],[.28,.52],[.26,.45],  [.38,.55],[.36,.40],[.35,.28],[.34,.18],  [.48,.53],[.47,.38],[.47,.26],[.47,.16],  [.57,.54],[.56,.38],[.55,.26],[.55,.15],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  X: [[.50,.90],[.40,.75],[.33,.62],[.28,.52],[.26,.45],  [.42,.55],[.40,.46],[.39,.40],[.39,.36],  [.50,.53],[.50,.45],[.50,.41],[.50,.38],  [.57,.54],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-  Y: [[.50,.90],[.40,.75],[.36,.63],[.31,.53],[.27,.46],  [.42,.55],[.41,.46],[.40,.42],[.40,.39],  [.50,.53],[.49,.45],[.49,.41],[.49,.38],  [.57,.54],[.57,.46],[.57,.42],[.57,.39],  [.65,.57],[.66,.43],[.67,.31],[.67,.20]],
-  Z: [[.50,.90],[.40,.75],[.33,.62],[.28,.52],[.26,.45],  [.42,.55],[.40,.40],[.39,.28],[.38,.18],  [.50,.53],[.50,.45],[.50,.41],[.50,.38],  [.57,.54],[.57,.46],[.57,.42],[.57,.39],  [.64,.57],[.65,.50],[.66,.46],[.66,.43]],
-};
-
-const HAND_CONNECTIONS_IDX = [
-  [0,1],[1,2],[2,3],[3,4],
-  [0,5],[5,6],[6,7],[7,8],
-  [0,9],[9,10],[10,11],[11,12],
-  [0,13],[13,14],[14,15],[15,16],
-  [0,17],[17,18],[18,19],[19,20],
-  [5,9],[9,13],[13,17]
-];
-
-function drawHintHand(letter) {
-  const hc = document.getElementById('hint-canvas');
-  const hx = hc.getContext('2d');
-  const W = hc.width, H = hc.height;
-  hx.clearRect(0, 0, W, H);
-
-  const pts = HAND_POSES[letter];
-  if (!pts) return;
-
-  // Scale landmarks to canvas
-  const s = pts.map(([x, y]) => [x * W, y * H]);
-
-  // ---- COLOUR PALETTE (warm illustrated skin tones) ----
-  const skinBase    = '#F2C49B';
-  const skinShade   = '#D9A07A';
-  const skinLight   = '#FAE0C6';
-  const skinDark    = '#C07E55';
-  const nailColor   = '#FFE4D6';
-  const nailStroke  = '#D9A07A';
-  const outlineCol  = '#9C5E35';
-  const jointCol    = '#E8A87C';
-
-  // Finger segment groups: [mcp, pip, dip, tip] indices
-  const fingers = [
-    [5,6,7,8],   // index
-    [9,10,11,12], // middle
-    [13,14,15,16],// ring
-    [17,18,19,20] // pinky
-  ];
-  const thumbSegs = [2,3,4]; // thumb: cmc→mcp→ip→tip
-
-  // Helper: draw a rounded finger segment as a filled polygon
-  function fingerSegment(p1, p2, r1, r2) {
-    const dx = p2[0]-p1[0], dy = p2[1]-p1[1];
-    const len = Math.sqrt(dx*dx+dy*dy)+0.001;
-    const nx = -dy/len, ny = dx/len;
-    hx.beginPath();
-    hx.moveTo(p1[0]+nx*r1, p1[1]+ny*r1);
-    hx.lineTo(p2[0]+nx*r2, p2[1]+ny*r2);
-    hx.lineTo(p2[0]-nx*r2, p2[1]-ny*r2);
-    hx.lineTo(p1[0]-nx*r1, p1[1]-ny*r1);
-    hx.closePath();
-  }
-
-  // Segment radii per finger (mcp→pip, pip→dip, dip→tip)
-  const segRad = [
-    [9,8,6],  // index
-    [10,9,7], // middle
-    [9,8,6],  // ring
-    [7,6,5],  // pinky
-  ];
-  const thumbRad = [10,8,7];
-
-  // --- Draw palm background ---
-  const palmPts = [s[0], s[5], s[9], s[13], s[17]];
-  hx.beginPath();
-  hx.moveTo(s[0][0], s[0][1]);
-  // Convex hull-ish palm
-  hx.bezierCurveTo(s[1][0]-8, s[1][1]+5, s[5][0]-8, s[5][1]+10, s[5][0], s[5][1]);
-  hx.lineTo(s[9][0], s[9][1]);
-  hx.lineTo(s[13][0], s[13][1]);
-  hx.lineTo(s[17][0], s[17][1]);
-  hx.bezierCurveTo(s[17][0]+8, s[17][1]+8, s[0][0]+12, s[0][1]-10, s[0][0], s[0][1]);
-  hx.closePath();
-  const palmGrad = hx.createRadialGradient(s[9][0], s[9][1], 2, s[0][0], s[0][1]+10, W*0.6);
-  palmGrad.addColorStop(0, skinLight);
-  palmGrad.addColorStop(0.5, skinBase);
-  palmGrad.addColorStop(1, skinShade);
-  hx.fillStyle = palmGrad;
-  hx.fill();
-  hx.strokeStyle = outlineCol;
-  hx.lineWidth = 1.5;
-  hx.stroke();
-
-  // --- Draw thumb ---
-  const tSegs = [[s[1],s[2]],[s[2],s[3]],[s[3],s[4]]];
-  for (let i = 0; i < tSegs.length; i++) {
-    const [a, b] = tSegs[i];
-    const r1 = thumbRad[i], r2 = thumbRad[Math.min(i+1,2)];
-    fingerSegment(a, b, r1, r2);
-    const g = hx.createLinearGradient(a[0],a[1],b[0],b[1]);
-    g.addColorStop(0, i===0?skinBase:skinLight);
-    g.addColorStop(1, i===2?skinShade:skinBase);
-    hx.fillStyle = g;
-    hx.fill();
-    hx.strokeStyle = outlineCol; hx.lineWidth = 1.2; hx.stroke();
-  }
-  // Thumb tip rounded cap
-  hx.beginPath();
-  hx.arc(s[4][0], s[4][1], thumbRad[2]*0.85, 0, Math.PI*2);
-  hx.fillStyle = skinLight; hx.fill();
-  hx.strokeStyle = outlineCol; hx.lineWidth = 1.2; hx.stroke();
-  // Thumbnail
-  hx.beginPath();
-  hx.ellipse(s[4][0], s[4][1]-2, 4, 5, 0, 0, Math.PI*2);
-  hx.fillStyle = nailColor; hx.fill();
-  hx.strokeStyle = nailStroke; hx.lineWidth = 0.8; hx.stroke();
-
-  // --- Draw 4 fingers ---
-  for (let f = 0; f < 4; f++) {
-    const [mcp, pip, dip, tip] = fingers[f];
-    const radii = segRad[f];
-    const segs = [[s[mcp],s[pip]],[s[pip],s[dip]],[s[dip],s[tip]]];
-    for (let i = 0; i < segs.length; i++) {
-      const [a, b] = segs[i];
-      const r1 = radii[i], r2 = radii[Math.min(i+1,2)];
-      fingerSegment(a, b, r1, r2);
-      const g = hx.createLinearGradient(a[0],a[1],b[0],b[1]);
-      g.addColorStop(0, skinBase);
-      g.addColorStop(0.5, skinLight);
-      g.addColorStop(1, skinShade);
-      hx.fillStyle = g; hx.fill();
-      hx.strokeStyle = outlineCol; hx.lineWidth = 1.2; hx.stroke();
-    }
-    // Fingertip rounded cap
-    const r = radii[2]*0.85;
-    hx.beginPath(); hx.arc(s[tip][0], s[tip][1], r, 0, Math.PI*2);
-    hx.fillStyle = skinLight; hx.fill();
-    hx.strokeStyle = outlineCol; hx.lineWidth = 1.2; hx.stroke();
-    // Fingernail
-    hx.beginPath();
-    hx.ellipse(s[tip][0], s[tip][1]-1, r*0.55, r*0.75, 0, 0, Math.PI*2);
-    hx.fillStyle = nailColor; hx.fill();
-    hx.strokeStyle = nailStroke; hx.lineWidth = 0.7; hx.stroke();
-    // Knuckle dots at pip and dip
-    for (const jIdx of [pip, dip]) {
-      hx.beginPath(); hx.arc(s[jIdx][0], s[jIdx][1], 3.5, 0, Math.PI*2);
-      hx.fillStyle = jointCol; hx.fill();
-    }
-  }
-
-  // Letter label – big & clear
-  hx.font = 'bold 28px "Fredoka One", cursive';
-  hx.fillStyle = 'rgba(255,255,255,0.92)';
-  hx.strokeStyle = 'rgba(0,0,0,0.5)';
-  hx.lineWidth = 3;
-  hx.textAlign = 'center';
-  hx.strokeText(letter, W*0.88, H*0.14);
-  hx.fillText(letter, W*0.88, H*0.14);
-}
-
-// =====================================================================
-// HINT TIMER
+// HINT TIMER (graphics disabled – no-ops kept for call-site compatibility)
 // =====================================================================
 let hintTimer = null;
 let hintHideTimer = null;
-const HINT_AFTER_MS   = 5000; // show hint after 5s of no success
-const HINT_DURATION_MS = 2500; // show for 2.5s then fade
-
-function startHintTimer() {
-  clearTimeout(hintTimer);
-  clearTimeout(hintHideTimer);
-  hideHintOverlay();
-  hintTimer = setTimeout(() => {
-    if (!processingResult) showHintOverlay();
-  }, HINT_AFTER_MS);
-}
-function stopHintTimer() {
-  clearTimeout(hintTimer);
-  clearTimeout(hintHideTimer);
-  hideHintOverlay();
-}
-function showHintOverlay() {
-  const letter = ALPHABET[currentIdx];
-  drawHintHand(letter);
-  const el = document.getElementById('hint-overlay');
-  el.classList.add('visible');
-  hintHideTimer = setTimeout(() => {
-    hideHintOverlay();
-    // Re-arm: show again if still not solved
-    hintTimer = setTimeout(() => {
-      if (!processingResult) showHintOverlay();
-    }, HINT_AFTER_MS);
-  }, HINT_DURATION_MS);
-}
-function hideHintOverlay() {
-  document.getElementById('hint-overlay').classList.remove('visible');
-}
+function startHintTimer() {}
+function stopHintTimer() {}
+function showHintOverlay() {}
+function hideHintOverlay() {}
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 let currentIdx = 0;
 let correctCount = 0;
